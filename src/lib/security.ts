@@ -14,3 +14,6 @@ export const newOtp = () => String(crypto.randomInt(100000, 1000000));
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
 export const newReference = () =>
   "LL-" + Array.from(crypto.randomBytes(4), (b) => ALPHABET[b % ALPHABET.length]).join("");
+
+export const newLeadReference = () =>
+  "WA-" + Array.from(crypto.randomBytes(4), (b) => ALPHABET[b % ALPHABET.length]).join("");

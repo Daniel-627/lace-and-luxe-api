@@ -34,5 +34,11 @@ for (const p of products) {
       });
     }
 }
+await db.setting.upsert({
+  where: { key: "whatsappNumber" },
+  update: {},
+  create: { key: "whatsappNumber", value: "254743667995" },
+});
+
 console.log("Seeded");
 await db.$disconnect();

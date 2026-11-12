@@ -122,3 +122,19 @@ model OrderItem {
   price     Int
   qty       Int
 }
+
+model Setting {
+  key   String @id
+  value String
+}
+
+model Lead {
+  id         Int      @id @default(autoincrement())
+  reference  String   @unique
+  source     String
+  items      Json
+  total      Int
+  status     String   @default("NEW")
+  customerId Int?
+  createdAt  DateTime @default(now())
+}
