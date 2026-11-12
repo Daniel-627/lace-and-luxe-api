@@ -22,6 +22,7 @@ model Product {
   image       String?
   categoryId  Int?
   category    Category? @relation(fields: [categoryId], references: [id])
+  active      Boolean   @default(true)
   variants    Variant[]
 }
 
@@ -107,6 +108,9 @@ model Order {
   items           OrderItem[]
   createdAt       DateTime    @default(now())
 
+  fulfilment      String      @default("NEW")
+  notes           String      @default("")
+
   @@index([contactPhone])
 }
 
@@ -137,4 +141,36 @@ model Lead {
   status     String   @default("NEW")
   customerId Int?
   createdAt  DateTime @default(now())
+  orderId    Int?
+}
+
+model Staff {
+  id           Int            @id @default(autoincrement())
+  email        String         @unique
+  name         String
+  passwordHash String
+  role         String         @default("STAFF")
+  active       Boolean        @default(true)
+  createdAt    DateTime       @default(now())
+  sessions     StaffSession[]
+}
+
+model StaffSession {
+  id        Int      @id @default(autoincrement())
+  tokenHash String   @unique
+  staffId   Int
+  staff     Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  staffId   Int?
+  staffName String
+  action    String
+  detail    String   @default("")
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
 }

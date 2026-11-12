@@ -9,6 +9,7 @@ r.get("/", ah(async (req, res) => {
   const q = typeof req.query.q === "string" ? req.query.q : undefined;
   res.json(await db.product.findMany({
     where: {
+      active: true,
       ...(category && { category: { slug: category } }),
       ...(q && { name: { contains: q, mode: "insensitive" } }),
     },
@@ -18,7 +19,7 @@ r.get("/", ah(async (req, res) => {
 }));
 
 r.get("/:slug", ah(async (req, res) => {
-  const p = await db.product.findUnique({ where: { slug: req.params.slug }, include: { category: true, variants: { orderBy: { id: "asc" } } } });
+  const p = await db.product.findFirst({ where: { slug: req.params.slug, active: true }, include: { category: true, variants: { orderBy: { id: "asc" } } } });
   if (!p) return res.status(404).json({ error: "Not found" });
   res.json(p);
 }));

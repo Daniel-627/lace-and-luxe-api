@@ -34,7 +34,7 @@ r.post("/", optionalAuth, ah(async (req, res) => {
   const lines: { productId: number; variantId: number; name: string; size: string; colour: string; price: number; qty: number }[] = [];
   for (const i of items) {
     const v = variants.find((x) => x.id === i.variantId);
-    if (!v || v.stock < i.qty)
+    if (!v || !v.product.active || v.stock < i.qty)
       return res.status(400).json({ error: `Unavailable: ${v ? `${v.product.name} (${v.size}, ${v.colour})` : i.variantId}` });
     lines.push({ productId: v.productId, variantId: v.id, name: v.product.name, size: v.size, colour: v.colour, price: v.price, qty: i.qty });
   }
