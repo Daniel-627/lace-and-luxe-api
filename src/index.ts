@@ -4,14 +4,19 @@ import { env } from "./env.js";
 import products from "./routes/products.js";
 import orders from "./routes/orders.js";
 import payments from "./routes/payments.js";
+import auth from "./routes/auth.js";
+import me from "./routes/me.js";
 
 const app = express();
+app.set("trust proxy", 1); // behind Render's proxy, so req.ip is the real client
 app.use(cors({ origin: env.WEB_URL }));
-app.use(express.json({ verify: (req, _res, buf) => { (req as Request).rawBody = buf; } })); // raw body for Paystack signature
+app.use(express.json({ limit: "100kb", verify: (req, _res, buf) => { (req as Request).rawBody = buf; } }));
 
 app.use("/api/products", products);
 app.use("/api/orders", orders);
 app.use("/api/pay", payments);
+app.use("/api/auth", auth);
+app.use("/api/me", me);
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {

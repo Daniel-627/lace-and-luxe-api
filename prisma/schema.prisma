@@ -19,17 +19,85 @@ model Product {
   name        String
   slug        String    @unique
   description String    @default("")
-  price       Int
-  stock       Int       @default(0)
   image       String?
   categoryId  Int?
   category    Category? @relation(fields: [categoryId], references: [id])
+  variants    Variant[]
+}
+
+model Variant {
+  id        Int     @id @default(autoincrement())
+  productId Int
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sku       String  @unique
+  size      String
+  colour    String
+  colourHex String?
+  price     Int
+  stock     Int     @default(0)
+
+  @@index([productId])
+}
+
+model Customer {
+  id         Int       @id @default(autoincrement())
+  phone      String    @unique
+  name       String?
+  email      String?
+  verifiedAt DateTime
+  createdAt  DateTime  @default(now())
+  orders     Order[]
+  addresses  Address[]
+  sessions   Session[]
+}
+
+model Address {
+  id         Int      @id @default(autoincrement())
+  customerId Int
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  label      String
+  name       String
+  phone      String
+  county     String
+  area       String
+  details    String   @default("")
+}
+
+model OtpCode {
+  id        Int       @id @default(autoincrement())
+  phone     String
+  codeHash  String
+  expiresAt DateTime
+  attempts  Int       @default(0)
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([phone, createdAt])
+}
+
+model Session {
+  id         Int      @id @default(autoincrement())
+  tokenHash  String   @unique
+  customerId Int
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
 }
 
 model Order {
   id              Int         @id @default(autoincrement())
-  email           String
-  phone           String
+  reference       String      @unique
+  trackingToken   String      @unique
+  customerId      Int?
+  customer        Customer?   @relation(fields: [customerId], references: [id])
+  contactName     String
+  contactPhone    String
+  email           String?
+  deliveryName    String
+  deliveryPhone   String
+  county          String
+  area            String
+  addressDetails  String      @default("")
   total           Int
   status          String      @default("PENDING")
   method          String?
@@ -38,6 +106,8 @@ model Order {
   mpesaReceipt    String?
   items           OrderItem[]
   createdAt       DateTime    @default(now())
+
+  @@index([contactPhone])
 }
 
 model OrderItem {
@@ -45,7 +115,10 @@ model OrderItem {
   orderId   Int
   order     Order  @relation(fields: [orderId], references: [id])
   productId Int
+  variantId Int
   name      String
+  size      String
+  colour    String
   price     Int
   qty       Int
 }
