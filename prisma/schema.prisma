@@ -24,6 +24,7 @@ model Product {
   category    Category? @relation(fields: [categoryId], references: [id])
   active      Boolean   @default(true)
   variants    Variant[]
+  media       ProductMedia[]
 }
 
 model Variant {
@@ -173,4 +174,16 @@ model AuditLog {
   createdAt DateTime @default(now())
 
   @@index([createdAt])
+}
+
+model ProductMedia {
+  id        Int     @id @default(autoincrement())
+  productId Int
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  kind      String
+  url       String
+  colour    String?
+  position  Int     @default(0)
+
+  @@index([productId])
 }

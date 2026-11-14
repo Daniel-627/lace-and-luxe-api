@@ -19,7 +19,7 @@ r.get("/", ah(async (req, res) => {
 }));
 
 r.get("/:slug", ah(async (req, res) => {
-  const p = await db.product.findFirst({ where: { slug: req.params.slug, active: true }, include: { category: true, variants: { orderBy: { id: "asc" } } } });
+  const p = await db.product.findFirst({ where: { slug: req.params.slug, active: true }, include: { category: true, variants: { orderBy: { id: "asc" } }, media: { orderBy: { position: "asc" } } } });
   if (!p) return res.status(404).json({ error: "Not found" });
   res.json(p);
 }));

@@ -66,6 +66,20 @@ const VariantIn = z.object({
   price: z.number().int().min(1).max(10_000_000),
   stock: z.number().int().min(0).max(100_000),
 });
+const VIDEO_HOSTS = ["youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "vimeo.com", "player.vimeo.com"];
+const MediaIn = z.object({
+  kind: z.enum(["IMAGE", "VIDEO"]),
+  url: z.string().trim().url().max(500),
+  colour: z.string().trim().max(30).nullish(),
+}).superRefine((m, ctx) => {
+  let u: URL;
+  try { u = new URL(m.url); } catch { return ctx.addIssue({ code: z.ZodIssueCode.custom, message: "That link is not valid" }); }
+  if (u.protocol !== "https:") ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Links must start with https://" });
+  if (m.kind === "IMAGE" && u.hostname !== "cdn.sanity.io") ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Photos must be uploaded through the admin" });
+  if (m.kind === "VIDEO" && !VIDEO_HOSTS.includes(u.hostname) && !/\.(mp4|webm|mov)$/i.test(u.pathname))
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Use a YouTube or Vimeo link, or a direct .mp4 link" });
+});
+
 const ProductIn = z.object({
   name: z.string().trim().min(2).max(120),
   slug: z.string().trim().max(120).optional(),
@@ -74,8 +88,20 @@ const ProductIn = z.object({
   categoryId: z.number().int().positive().nullable().optional(),
   active: z.boolean().default(true),
   variants: z.array(VariantIn).min(1, "Add at least one size/colour").max(100),
+  media: z.array(MediaIn).max(20).default([]),
 });
-const productInclude = { category: true, variants: { orderBy: { id: "asc" as const } } };
+type ProductBody = z.infer<typeof ProductIn>;
+/** A photo or video can only be tied to a colour that exists on the product. */
+function mediaProblem(d: ProductBody): string | null {
+  const have = new Set(d.variants.map((v) => v.colour.trim().toLowerCase()));
+  const bad = d.media.find((m) => m.colour && !have.has(m.colour.trim().toLowerCase()));
+  return bad ? `A ${bad.kind === "VIDEO" ? "video" : "photo"} is set for the colour "${bad.colour}", but no size has that colour` : null;
+}
+const mediaRows = (media: ProductBody["media"]) => media.map((m, i) => ({ kind: m.kind, url: m.url, colour: m.colour?.trim() || null, position: i }));
+/** The cover shown in shop lists: first photo for all colours, else the first photo. */
+const coverOf = (media: ProductBody["media"]) => (media.find((m) => m.kind === "IMAGE" && !m.colour) ?? media.find((m) => m.kind === "IMAGE"))?.url ?? null;
+
+const productInclude = { category: true, variants: { orderBy: { id: "asc" as const } }, media: { orderBy: { position: "asc" as const } } };
 
 r.get("/products", ah(async (_req, res) => {
   res.json(await db.product.findMany({ include: productInclude, orderBy: { id: "desc" } }));
@@ -92,11 +118,14 @@ r.post("/products", ah(async (req, res) => {
   const b = ProductIn.safeParse(req.body);
   if (!b.success) return res.status(400).json({ error: first(b.error) });
   const d = b.data; const slug = slugify(d.slug || d.name);
+  const badMedia = mediaProblem(d);
+  if (badMedia) return res.status(400).json({ error: badMedia });
   if (!slug) return res.status(400).json({ error: "Name needs letters or numbers" });
   try {
     const p = await db.product.create({
       data: {
-        name: d.name, slug, description: d.description, image: d.image ?? null, categoryId: d.categoryId ?? null, active: d.active,
+        name: d.name, slug, description: d.description, image: coverOf(d.media), categoryId: d.categoryId ?? null, active: d.active,
+        media: { create: mediaRows(d.media) },
         variants: { create: d.variants.map((v) => ({ sku: v.sku || makeSku(slug, v), size: v.size, colour: v.colour, colourHex: v.colourHex ?? null, price: v.price, stock: v.stock })) },
       },
       include: productInclude,
@@ -112,6 +141,8 @@ r.put("/products/:id", ah(async (req, res) => {
   if (!id) return res.status(400).json({ error: "Bad id" });
   if (!b.success) return res.status(400).json({ error: first(b.error) });
   const d = b.data;
+  const badMedia = mediaProblem(d);
+  if (badMedia) return res.status(400).json({ error: badMedia });
   const existing = await db.product.findUnique({ where: { id }, include: { variants: true } });
   if (!existing) return res.status(404).json({ error: "Not found" });
   const own = new Set(existing.variants.map((v) => v.id));
@@ -120,14 +151,16 @@ r.put("/products/:id", ah(async (req, res) => {
   const slug = d.slug ? slugify(d.slug) : existing.slug;
   try {
     await db.$transaction([
+      db.productMedia.deleteMany({ where: { productId: id } }),
       db.variant.deleteMany({ where: { productId: id, id: { notIn: keep } } }),
-      db.product.update({ where: { id }, data: { name: d.name, slug, description: d.description, image: d.image ?? null, categoryId: d.categoryId ?? null, active: d.active } }),
+      db.product.update({ where: { id }, data: { name: d.name, slug, description: d.description, image: coverOf(d.media), categoryId: d.categoryId ?? null, active: d.active } }),
       ...d.variants.map((v) => {
         const data = { size: v.size, colour: v.colour, colourHex: v.colourHex ?? null, price: v.price, stock: v.stock };
         return v.id
           ? db.variant.update({ where: { id: v.id }, data: { ...data, ...(v.sku && { sku: v.sku }) } })
           : db.variant.create({ data: { ...data, productId: id, sku: v.sku || makeSku(slug, v) } });
       }),
+      db.productMedia.createMany({ data: mediaRows(d.media).map((m) => ({ ...m, productId: id })) }),
     ]);
   } catch (e) { if (isUnique(e)) return res.status(409).json({ error: "That slug or SKU already exists" }); throw e; }
   audit(req, "product.update", d.name);
