@@ -22,7 +22,9 @@ r.patch("/", ah(async (req, res) => {
 }));
 
 r.get("/orders", ah(async (req, res) => {
-  const orders = await db.order.findMany({ where: { customerId: req.customerId! }, include: { items: true }, orderBy: { createdAt: "desc" } });
+  // The verified phone number is the key: orders placed with it belong to this customer, signed in or not.
+  const me = await db.customer.findUniqueOrThrow({ where: { id: req.customerId! } });
+  const orders = await db.order.findMany({ where: { OR: [{ customerId: me.id }, { contactPhone: me.phone }] }, include: { items: true }, orderBy: { createdAt: "desc" } });
   res.json(orders.map((o) => ({ ...orderView(o), trackingToken: o.trackingToken })));
 }));
 

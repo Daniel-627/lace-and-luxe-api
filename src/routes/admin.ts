@@ -305,7 +305,7 @@ r.post("/staff", requireOwner, ah(async (req, res) => {
   if (!b.success) return res.status(400).json({ error: first(b.error) });
   const password = tempPassword();
   try {
-    const s = await db.staff.create({ data: { email: b.data.email.toLowerCase(), name: b.data.name, role: b.data.role, passwordHash: await hashPassword(password) } });
+    const s = await db.staff.create({ data: { email: b.data.email.toLowerCase(), name: b.data.name, role: b.data.role, passwordHash: await hashPassword(password), mustChangePassword: true } });
     audit(req, "staff.create", s.email);
     res.status(201).json({ ...staffView(s), temporaryPassword: password }); // shown once
   } catch (e) { if (isUnique(e)) return res.status(409).json({ error: "That email already has an account" }); throw e; }
@@ -318,7 +318,7 @@ r.patch("/staff/:id", requireOwner, ah(async (req, res) => {
   if (id === req.staff!.id && (b.data.active === false || (b.data.role && b.data.role !== "OWNER")))
     return res.status(400).json({ error: "You can't remove your own owner access" });
   const password = b.data.resetPassword ? tempPassword() : undefined;
-  const s = await db.staff.update({ where: { id }, data: { ...(b.data.active !== undefined && { active: b.data.active }), ...(b.data.role && { role: b.data.role }), ...(password && { passwordHash: await hashPassword(password) }) } });
+  const s = await db.staff.update({ where: { id }, data: { ...(b.data.active !== undefined && { active: b.data.active }), ...(b.data.role && { role: b.data.role }), ...(password && { passwordHash: await hashPassword(password), mustChangePassword: true }) } });
   if (b.data.active === false || password) await db.staffSession.deleteMany({ where: { staffId: id } });
   audit(req, "staff.update", s.email);
   res.json({ ...staffView(s), ...(password && { temporaryPassword: password }) });

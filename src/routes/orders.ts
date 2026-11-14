@@ -7,6 +7,7 @@ import { newReference, newToken } from "../lib/security.js";
 import { limited } from "../lib/rateLimit.js";
 import { optionalAuth } from "../middleware/auth.js";
 import { orderView } from "../lib/views.js";
+import { clientIp } from "../lib/clientIp.js";
 
 const r = Router();
 const MIN = 60 * 1000;
@@ -58,7 +59,7 @@ r.post("/", optionalAuth, ah(async (req, res) => {
 
 // Guests follow the link they were sent. The long random token is the key.
 r.get("/track/:token", ah(async (req, res) => {
-  if (limited(`track:${req.ip}`, 60, 10 * MIN)) return res.status(429).json({ error: "Too many requests" });
+  if (limited(`track:${clientIp(req)}`, 60, 10 * MIN)) return res.status(429).json({ error: "Too many requests" });
   const o = await db.order.findUnique({ where: { trackingToken: req.params.token }, include: { items: true } });
   if (!o) return res.status(404).json({ error: "Order not found" });
   res.json(orderView(o));
@@ -66,7 +67,7 @@ r.get("/track/:token", ah(async (req, res) => {
 
 // Manual lookup: reference + phone. Same answer for "no such order" and "wrong phone".
 r.post("/lookup", ah(async (req, res) => {
-  if (limited(`lookup:${req.ip}`, 10, 10 * MIN)) return res.status(429).json({ error: "Too many attempts. Try again later." });
+  if (limited(`lookup:${clientIp(req)}`, 10, 10 * MIN)) return res.status(429).json({ error: "Too many attempts. Try again later." });
   const body = z.object({ reference: z.string().trim().toUpperCase(), phone: z.string() }).safeParse(req.body);
   const phone = body.success ? normalizeKePhone(body.data.phone) : null;
   const o = body.success && phone

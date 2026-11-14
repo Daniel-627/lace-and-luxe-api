@@ -13,8 +13,8 @@ const passwordHash = await hashPassword(password);
 
 await db.staff.upsert({
   where: { email: email.toLowerCase() },
-  update: { passwordHash, role: "OWNER", active: true, name },
-  create: { email: email.toLowerCase(), name, passwordHash, role: "OWNER" },
+  update: { passwordHash, role: "OWNER", active: true, name, mustChangePassword: true },
+  create: { email: email.toLowerCase(), name, passwordHash, role: "OWNER", mustChangePassword: true },
 });
 console.log(`\nOwner ready: ${email.toLowerCase()}\nTemporary password (shown once): ${password}\nChange it after your first sign-in.\n`);
 await db.$disconnect();

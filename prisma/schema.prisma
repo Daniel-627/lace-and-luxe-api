@@ -152,6 +152,7 @@ model Staff {
   passwordHash String
   role         String         @default("STAFF")
   active       Boolean        @default(true)
+  mustChangePassword Boolean      @default(false)
   createdAt    DateTime       @default(now())
   sessions     StaffSession[]
 }

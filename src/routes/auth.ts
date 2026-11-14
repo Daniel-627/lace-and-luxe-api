@@ -6,6 +6,7 @@ import { phoneSchema } from "../lib/phone.js";
 import { hash, newOtp, newToken, safeEqual } from "../lib/security.js";
 import { limited } from "../lib/rateLimit.js";
 import { sendSms } from "../lib/sms.js";
+import { clientIp } from "../lib/clientIp.js";
 
 const r = Router();
 const MIN = 60 * 1000;
@@ -20,7 +21,7 @@ r.post("/request-code", ah(async (req, res) => {
     db.otpCode.count({ where: { phone, createdAt: { gt: new Date(Date.now() - 10 * MIN) } } }),
     db.otpCode.count({ where: { phone, createdAt: { gt: new Date(Date.now() - 24 * 60 * MIN) } } }),
   ]);
-  if (recent >= 3 || daily >= 10 || limited(`otp:${req.ip}`, 10, 60 * MIN))
+  if (recent >= 3 || daily >= 10 || limited(`otp:${clientIp(req)}`, 10, 60 * MIN))
     return res.status(429).json({ error: "Too many requests. Please try again later." });
 
   const code = newOtp();

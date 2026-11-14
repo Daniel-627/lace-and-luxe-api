@@ -6,7 +6,7 @@ import { limited } from "../lib/rateLimit.js";
 import { hash, newToken } from "../lib/security.js";
 import { hashPassword, verifyPassword } from "../lib/password.js";
 import { audit } from "../lib/audit.js";
-import { requireStaff } from "../middleware/staff.js";
+import { requireStaffAny } from "../middleware/staff.js";
 
 const r = Router();
 const MIN = 60 * 1000;
@@ -26,24 +26,25 @@ r.post("/login", ah(async (req, res) => {
 
   const token = newToken();
   await db.staffSession.create({ data: { tokenHash: hash(token), staffId: staff.id, expiresAt: new Date(Date.now() + 12 * 60 * MIN) } });
-  req.staff = { id: staff.id, name: staff.name, email: staff.email, role: staff.role };
+  req.staff = { id: staff.id, name: staff.name, email: staff.email, role: staff.role, mustChangePassword: staff.mustChangePassword };
   audit(req, "login");
   res.json({ token, staff: req.staff });
 }));
 
-r.get("/me", requireStaff, (req, res) => { res.json(req.staff); });
+r.get("/me", requireStaffAny, (req, res) => { res.json(req.staff); });
 
-r.post("/logout", requireStaff, ah(async (req, res) => {
+r.post("/logout", requireStaffAny, ah(async (req, res) => {
   await db.staffSession.deleteMany({ where: { tokenHash: hash(req.header("authorization")!.slice(7)) } });
   res.json({ ok: true });
 }));
 
-r.post("/password", requireStaff, ah(async (req, res) => {
+r.post("/password", requireStaffAny, ah(async (req, res) => {
   const b = z.object({ current: z.string().min(1), next: z.string().min(10, "Use at least 10 characters").max(200) }).safeParse(req.body);
   if (!b.success) return res.status(400).json({ error: b.error.issues[0]?.message ?? "Invalid input" });
   const staff = await db.staff.findUniqueOrThrow({ where: { id: req.staff!.id } });
   if (!(await verifyPassword(b.data.current, staff.passwordHash))) return res.status(400).json({ error: "Current password is wrong" });
-  await db.staff.update({ where: { id: staff.id }, data: { passwordHash: await hashPassword(b.data.next) } });
+  if (b.data.next === b.data.current) return res.status(400).json({ error: "Choose a different password from the current one" });
+  await db.staff.update({ where: { id: staff.id }, data: { passwordHash: await hashPassword(b.data.next), mustChangePassword: false } });
   await db.staffSession.deleteMany({ where: { staffId: staff.id, tokenHash: { not: hash(req.header("authorization")!.slice(7)) } } });
   audit(req, "password.change");
   res.json({ ok: true });

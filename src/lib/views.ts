@@ -5,6 +5,7 @@ import { maskPhone } from "./phone.js";
 export const orderView = (o: Order & { items: OrderItem[] }) => ({
   reference: o.reference,
   status: o.status,
+  fulfilment: o.fulfilment,
   method: o.method,
   total: o.total,
   createdAt: o.createdAt,
