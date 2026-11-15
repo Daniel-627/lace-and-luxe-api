@@ -23,6 +23,8 @@ model Product {
   categoryId  Int?
   category    Category? @relation(fields: [categoryId], references: [id])
   active      Boolean   @default(true)
+  payNow         Boolean @default(true)
+  payOnDelivery  Boolean @default(false)
   variants    Variant[]
   media       ProductMedia[]
 }
@@ -188,4 +190,54 @@ model ProductMedia {
   position  Int     @default(0)
 
   @@index([productId])
+}
+
+model DeliveryService {
+  id          Int            @id @default(autoincrement())
+  name        String
+  description String         @default("")
+  etaText     String         @default("")
+  active      Boolean        @default(true)
+  allowsCod   Boolean        @default(false)
+  position    Int            @default(0)
+  rates       DeliveryRate[]
+}
+
+model DeliveryRate {
+  id         Int             @id @default(autoincrement())
+  serviceId  Int
+  service    DeliveryService @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  county     String
+  area       String?
+  fee        Int
+  freeAbove  Int?
+  etaText    String?
+
+  @@index([serviceId])
+}
+
+model PaymentAccount {
+  id            Int     @id @default(autoincrement())
+  kind          String
+  displayName   String
+  number        String
+  accountNumber String?
+  useOrderRef   Boolean @default(false)
+  active        Boolean @default(true)
+  position      Int     @default(0)
+}
+
+model DiscountCode {
+  id          Int       @id @default(autoincrement())
+  code        String    @unique
+  description String    @default("")
+  kind        String
+  value       Int
+  minSubtotal Int       @default(0)
+  startsAt    DateTime?
+  endsAt      DateTime?
+  maxUses     Int?
+  uses        Int       @default(0)
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
 }

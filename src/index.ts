@@ -9,6 +9,7 @@ import me from "./routes/me.js";
 import leads from "./routes/leads.js";
 import adminAuth from "./routes/adminAuth.js";
 import admin from "./routes/admin.js";
+import adminCommerce from "./routes/adminCommerce.js";
 
 const app = express();
 app.set("trust proxy", 1); // behind Render's proxy, so req.ip is the real client
@@ -23,6 +24,7 @@ app.use("/api/me", me);
 app.use("/api/leads", leads);
 app.use("/api/admin", adminAuth);
 app.use("/api/admin", admin);
+app.use("/api/admin", adminCommerce);
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {

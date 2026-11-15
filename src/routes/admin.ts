@@ -89,12 +89,15 @@ const ProductIn = z.object({
   image: z.string().url().nullable().optional(),
   categoryId: z.number().int().positive().nullable().optional(),
   active: z.boolean().default(true),
+  payNow: z.boolean().default(true),
+  payOnDelivery: z.boolean().default(false),
   variants: z.array(VariantIn).min(1, "Add at least one size/colour").max(100),
   media: z.array(MediaIn).max(20).default([]),
 });
 type ProductBody = z.infer<typeof ProductIn>;
 /** A photo or video can only be tied to a colour that exists on the product. */
 function mediaProblem(d: ProductBody): string | null {
+  if (!d.payNow && !d.payOnDelivery) return "Allow at least one way to pay for this product";
   const have = new Set(d.variants.map((v) => v.colour.trim().toLowerCase()));
   const bad = d.media.find((m) => m.colour && !have.has(m.colour.trim().toLowerCase()));
   return bad ? `A ${bad.kind === "VIDEO" ? "video" : "photo"} is set for the colour "${bad.colour}", but no size has that colour` : null;
@@ -126,7 +129,7 @@ r.post("/products", ah(async (req, res) => {
   try {
     const p = await db.product.create({
       data: {
-        name: d.name, slug, description: d.description, image: coverOf(d.media), categoryId: d.categoryId ?? null, active: d.active,
+        name: d.name, slug, description: d.description, image: coverOf(d.media), categoryId: d.categoryId ?? null, active: d.active, payNow: d.payNow, payOnDelivery: d.payOnDelivery,
         media: { create: mediaRows(d.media) },
         variants: { create: d.variants.map((v) => ({ sku: v.sku || makeSku(slug, v), size: v.size, colour: v.colour, colourHex: v.colourHex ?? null, price: v.price, stock: v.stock })) },
       },
@@ -155,7 +158,7 @@ r.put("/products/:id", ah(async (req, res) => {
     await db.$transaction([
       db.productMedia.deleteMany({ where: { productId: id } }),
       db.variant.deleteMany({ where: { productId: id, id: { notIn: keep } } }),
-      db.product.update({ where: { id }, data: { name: d.name, slug, description: d.description, image: coverOf(d.media), categoryId: d.categoryId ?? null, active: d.active } }),
+      db.product.update({ where: { id }, data: { name: d.name, slug, description: d.description, image: coverOf(d.media), categoryId: d.categoryId ?? null, active: d.active, payNow: d.payNow, payOnDelivery: d.payOnDelivery } }),
       ...d.variants.map((v) => {
         const data = { size: v.size, colour: v.colour, colourHex: v.colourHex ?? null, price: v.price, stock: v.stock };
         return v.id
