@@ -4,7 +4,8 @@ import type { Prisma } from "@prisma/client";
 import { db } from "../lib/db.js";
 import { ah } from "../lib/async.js";
 import { audit } from "../lib/audit.js";
-import { normalizeKePhone, phoneSchema } from "../lib/phone.js";
+import { maskPhone, normalizeKePhone, phoneSchema } from "../lib/phone.js";
+import { unseal } from "../lib/vault.js";
 import { hashPassword, tempPassword } from "../lib/password.js";
 import { newReference, newToken } from "../lib/security.js";
 import { requireOwner, requireStaff } from "../middleware/staff.js";
@@ -22,15 +23,16 @@ const first = (e: z.ZodError) => e.issues[0]?.message ?? "Invalid input";
 r.get("/stats", ah(async (_req, res) => {
   const EAT = 3 * 3600 * 1000; // Kenya is UTC+3
   const startToday = new Date(Math.floor((Date.now() + EAT) / 86400000) * 86400000 - EAT);
-  const [ordersToday, paid, pendingOrders, newLeads, low] = await Promise.all([
+  const [ordersToday, paid, pendingOrders, newLeads, low, pendingCodes] = await Promise.all([
     db.order.count({ where: { createdAt: { gte: startToday } } }),
     db.order.aggregate({ _sum: { total: true }, where: { status: "PAID", createdAt: { gte: startToday } } }),
     db.order.count({ where: { status: "PENDING" } }),
     db.lead.count({ where: { status: "NEW" } }),
     db.variant.findMany({ where: { stock: { lte: 3 }, product: { active: true } }, include: { product: { select: { name: true } } }, orderBy: { stock: "asc" }, take: 10 }),
+    db.otpCode.count({ where: { codeEnc: { not: null }, usedAt: null, expiresAt: { gt: new Date() } } }),
   ]);
   res.json({
-    ordersToday, revenueToday: paid._sum.total ?? 0, pendingOrders, newLeads,
+    ordersToday, revenueToday: paid._sum.total ?? 0, pendingOrders, newLeads, pendingCodes,
     lowStock: low.map((v) => ({ variantId: v.id, name: v.product.name, size: v.size, colour: v.colour, stock: v.stock })),
   });
 }));
@@ -278,19 +280,56 @@ r.post("/leads/:id/convert", ah(async (req, res) => {
   res.status(201).json(await db.order.findUnique({ where: { id: order.id }, include: { items: true } }));
 }));
 
-// ---------- Settings (owner) ----------
-r.get("/settings", requireOwner, ah(async (_req, res) => {
-  const s = await db.setting.findUnique({ where: { key: "whatsappNumber" } });
-  res.json({ whatsappNumber: s?.value ?? null });
+// ---------- Sign-in codes (manual delivery) ----------
+r.get("/login-codes", ah(async (_req, res) => {
+  const manual = (await db.setting.findUnique({ where: { key: "manualCodes" } }))?.value === "on";
+  const rows = await db.otpCode.findMany({ where: { createdAt: { gt: new Date(Date.now() - 60 * 60 * 1000) } }, orderBy: { createdAt: "desc" }, take: 50 });
+  const customers = await db.customer.findMany({ where: { phone: { in: rows.map((x) => x.phone) } }, select: { phone: true, name: true } });
+  const now = new Date();
+  res.json({
+    manualMode: manual,
+    codes: rows.map((x) => ({
+      id: x.id, phone: x.phone, name: customers.find((c) => c.phone === x.phone)?.name ?? null, createdAt: x.createdAt, expiresAt: x.expiresAt,
+      status: x.usedAt ? "USED" : x.expiresAt <= now ? "EXPIRED" : x.codeEnc ? "WAITING" : "UNAVAILABLE",
+    })),
+  });
 }));
 
+// The code is only ever returned here, one at a time, and every view is recorded.
+r.post("/login-codes/:id/reveal", ah(async (req, res) => {
+  const id = idOf(req); if (!id) return res.status(400).json({ error: "Bad id" });
+  const row = await db.otpCode.findUnique({ where: { id } });
+  if (!row || row.usedAt || row.expiresAt <= new Date() || !row.codeEnc) return res.status(404).json({ error: "That code is no longer available" });
+  const code = unseal(row.codeEnc);
+  if (!code) return res.status(500).json({ error: "Could not read that code" });
+  audit(req, "login-code.reveal", maskPhone(row.phone));
+  res.json({ phone: row.phone, code, expiresAt: row.expiresAt });
+}));
+
+// ---------- Settings (owner) ----------
+async function readSettings() {
+  const rows = await db.setting.findMany({ where: { key: { in: ["whatsappNumber", "manualCodes"] } } });
+  const m = Object.fromEntries(rows.map((x) => [x.key, x.value]));
+  return { whatsappNumber: m.whatsappNumber ?? null, manualCodes: m.manualCodes === "on" };
+}
+
+r.get("/settings", requireOwner, ah(async (_req, res) => { res.json(await readSettings()); }));
+
 r.patch("/settings", requireOwner, ah(async (req, res) => {
-  const b = z.object({ whatsappNumber: z.string() }).safeParse(req.body);
-  const number = b.success ? normalizeKePhone(b.data.whatsappNumber) : null;
-  if (!number) return res.status(400).json({ error: "Enter a valid Kenyan phone number" });
-  await db.setting.upsert({ where: { key: "whatsappNumber" }, update: { value: number }, create: { key: "whatsappNumber", value: number } });
-  audit(req, "settings.update", `whatsappNumber ${number}`);
-  res.json({ whatsappNumber: number });
+  const b = z.object({ whatsappNumber: z.string().optional(), manualCodes: z.boolean().optional() }).safeParse(req.body);
+  if (!b.success) return res.status(400).json({ error: "Invalid input" });
+  if (b.data.whatsappNumber !== undefined) {
+    const number = normalizeKePhone(b.data.whatsappNumber);
+    if (!number) return res.status(400).json({ error: "Enter a valid Kenyan phone number" });
+    await db.setting.upsert({ where: { key: "whatsappNumber" }, update: { value: number }, create: { key: "whatsappNumber", value: number } });
+    audit(req, "settings.update", `whatsappNumber ${number}`);
+  }
+  if (b.data.manualCodes !== undefined) {
+    const value = b.data.manualCodes ? "on" : "off";
+    await db.setting.upsert({ where: { key: "manualCodes" }, update: { value }, create: { key: "manualCodes", value } });
+    audit(req, "settings.update", `manualCodes ${value}`);
+  }
+  res.json(await readSettings());
 }));
 
 // ---------- Staff (owner) ----------

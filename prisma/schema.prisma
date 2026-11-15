@@ -69,6 +69,7 @@ model OtpCode {
   id        Int       @id @default(autoincrement())
   phone     String
   codeHash  String
+  codeEnc   String?
   expiresAt DateTime
   attempts  Int       @default(0)
   usedAt    DateTime?

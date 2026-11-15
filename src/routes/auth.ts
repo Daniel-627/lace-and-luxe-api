@@ -7,6 +7,7 @@ import { hash, newOtp, newToken, safeEqual } from "../lib/security.js";
 import { limited } from "../lib/rateLimit.js";
 import { sendSms } from "../lib/sms.js";
 import { clientIp } from "../lib/clientIp.js";
+import { seal } from "../lib/vault.js";
 
 const r = Router();
 const MIN = 60 * 1000;
@@ -24,10 +25,22 @@ r.post("/request-code", ah(async (req, res) => {
   if (recent >= 3 || daily >= 10 || limited(`otp:${clientIp(req)}`, 10, 60 * MIN))
     return res.status(429).json({ error: "Too many requests. Please try again later." });
 
+  // When "manual codes" is on, staff can read the code in the admin and send it on WhatsApp.
+  const manual = (await db.setting.findUnique({ where: { key: "manualCodes" } }))?.value === "on";
+  const minutes = manual ? 10 : 5;
+  await db.otpCode.updateMany({
+    where: { codeEnc: { not: null }, OR: [{ usedAt: { not: null } }, { expiresAt: { lt: new Date() } }] },
+    data: { codeEnc: null },
+  });
+
   const code = newOtp();
-  await db.otpCode.create({ data: { phone, codeHash: hash(`${phone}:${code}`), expiresAt: new Date(Date.now() + 5 * MIN) } });
-  await sendSms(phone, `Your Lace & Luxe code is ${code}. It expires in 5 minutes.`);
-  res.json({ ok: true });
+  await db.otpCode.create({ data: { phone, codeHash: hash(`${phone}:${code}`), codeEnc: manual ? seal(code) : null, expiresAt: new Date(Date.now() + minutes * MIN) } });
+  try {
+    await sendSms(phone, `Your Lace & Luxe code is ${code}. It expires in ${minutes} minutes.`);
+  } catch (e) {
+    if (!manual) throw e; // in manual mode a failed text is fine: staff can send the code themselves
+  }
+  res.json({ ok: true, manual });
 }));
 
 r.post("/verify", ah(async (req, res) => {
@@ -45,7 +58,7 @@ r.post("/verify", ah(async (req, res) => {
     await db.otpCode.update({ where: { id: otp.id }, data: { attempts: { increment: 1 } } });
     return fail();
   }
-  await db.otpCode.update({ where: { id: otp.id }, data: { usedAt: new Date() } });
+  await db.otpCode.update({ where: { id: otp.id }, data: { usedAt: new Date(), codeEnc: null } });
 
   const now = new Date();
   const customer = await db.customer.upsert({ where: { phone }, update: { verifiedAt: now }, create: { phone, verifiedAt: now } });
