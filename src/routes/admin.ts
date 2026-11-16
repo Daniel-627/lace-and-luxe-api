@@ -7,6 +7,7 @@ import { audit } from "../lib/audit.js";
 import { maskPhone, normalizeKePhone, phoneSchema } from "../lib/phone.js";
 import { unseal } from "../lib/vault.js";
 import { releaseStock, reserveForOrder, settleOrder } from "../lib/stock.js";
+import { notifyOrder } from "../lib/messaging/service.js";
 import { hashPassword, tempPassword } from "../lib/password.js";
 import { newReference, newToken } from "../lib/security.js";
 import { requireOwner, requireStaff } from "../middleware/staff.js";
@@ -24,16 +25,17 @@ const first = (e: z.ZodError) => e.issues[0]?.message ?? "Invalid input";
 r.get("/stats", ah(async (_req, res) => {
   const EAT = 3 * 3600 * 1000; // Kenya is UTC+3
   const startToday = new Date(Math.floor((Date.now() + EAT) / 86400000) * 86400000 - EAT);
-  const [ordersToday, paid, pendingOrders, newLeads, low, pendingCodes] = await Promise.all([
+  const [ordersToday, paid, pendingOrders, newLeads, low, pendingCodes, messagesNeedingAction] = await Promise.all([
     db.order.count({ where: { createdAt: { gte: startToday } } }),
     db.order.aggregate({ _sum: { total: true }, where: { status: "PAID", createdAt: { gte: startToday } } }),
     db.order.count({ where: { status: "PENDING" } }),
     db.lead.count({ where: { status: "NEW" } }),
     db.variant.findMany({ where: { stock: { lte: 3 }, product: { active: true } }, include: { product: { select: { name: true } } }, orderBy: { stock: "asc" }, take: 10 }),
     db.otpCode.count({ where: { codeEnc: { not: null }, usedAt: null, expiresAt: { gt: new Date() } } }),
+    db.message.count({ where: { status: { in: ["MANUAL", "FAILED"] } } }),
   ]);
   res.json({
-    ordersToday, revenueToday: paid._sum.total ?? 0, pendingOrders, newLeads, pendingCodes,
+    ordersToday, revenueToday: paid._sum.total ?? 0, pendingOrders, newLeads, pendingCodes, messagesNeedingAction,
     lowStock: low.map((v) => ({ variantId: v.id, name: v.product.name, size: v.size, colour: v.colour, stock: v.stock })),
   });
 }));
@@ -220,6 +222,8 @@ r.patch("/orders/:id", ah(async (req, res) => {
   if (!o) return res.status(404).json({ error: "Not found" });
   await db.order.update({ where: { id }, data: { ...(d.fulfilment && { fulfilment: d.fulfilment }), ...(d.notes !== undefined && { notes: d.notes }) } });
   if (d.fulfilment === "CANCELLED") await releaseStock(id); // cancelling puts the stock back
+  const FUL_MSG: Record<string, string> = { PACKED: "ORDER_PACKED", OUT_FOR_DELIVERY: "OUT_FOR_DELIVERY", DELIVERED: "DELIVERED", CANCELLED: "ORDER_CANCELLED" };
+  if (d.fulfilment && d.fulfilment !== o.fulfilment && FUL_MSG[d.fulfilment]) void notifyOrder(FUL_MSG[d.fulfilment], id);
   if (d.markPaid) await markPaid(id, { method: d.method ?? o.method ?? "WHATSAPP", mpesaReceipt: d.mpesaReceipt });
   audit(req, "order.update", `${o.reference} ${JSON.stringify(d)}`);
   res.json(await db.order.findUnique({ where: { id }, include: { items: true } }));

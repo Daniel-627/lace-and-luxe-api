@@ -12,6 +12,8 @@ import admin from "./routes/admin.js";
 import adminCommerce from "./routes/adminCommerce.js";
 import checkout from "./routes/checkout.js";
 import { expireUnpaid } from "./lib/jobs.js";
+import adminMessaging from "./routes/adminMessaging.js";
+import { sweepMessages } from "./lib/messaging/service.js";
 
 const app = express();
 app.set("trust proxy", 1); // behind Render's proxy, so req.ip is the real client
@@ -26,6 +28,7 @@ app.use("/api/me", me);
 app.use("/api/leads", leads);
 app.use("/api/admin", adminAuth);
 app.use("/api/admin", admin);
+app.use("/api/admin", adminMessaging); // before adminCommerce, which is owner-only
 app.use("/api/admin", adminCommerce);
 app.use("/api/checkout", checkout);
 app.get("/health", (_req, res) => res.json({ ok: true }));
@@ -39,5 +42,8 @@ app.listen(env.PORT, () => console.log(`API listening on :${env.PORT}`));
 
 // Unpaid pay-now orders are released after the hold time (set in Admin > Payments).
 const sweep = () => expireUnpaid().catch((e) => console.error("expiry job failed", e));
+const sweepMsgs = () => sweepMessages().catch((e) => console.error("message sweep failed", e));
 setInterval(sweep, 60_000);
+setInterval(sweepMsgs, 30_000);
 sweep();
+sweepMsgs();

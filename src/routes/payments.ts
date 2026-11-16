@@ -9,6 +9,7 @@ import { normalizeKePhone } from "../lib/phone.js";
 import { stkPush } from "../lib/daraja.js";
 import { payConfig } from "../lib/pricing.js";
 import { settleOrder } from "../lib/stock.js";
+import { notifyOrder } from "../lib/messaging/service.js";
 import * as paystack from "../lib/paystack.js";
 
 const r = Router();
@@ -74,6 +75,7 @@ r.post("/manual", ah(async (req, res) => {
   if (used) return res.status(409).json({ error: "That M-Pesa code has already been used on another order." });
   await db.order.update({ where: { id: order.id }, data: { paymentClaim: code, paymentClaimAt: new Date(), method: "MPESA_MANUAL", paymentAccountId: b.data.accountId ?? order.paymentAccountId } });
   res.json({ ok: true });
+  void notifyOrder("STAFF_PAYMENT_CLAIM", order.id);
 }));
 
 // ---- Cards (Paystack): paused for now ----

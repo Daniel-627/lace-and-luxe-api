@@ -6,6 +6,7 @@ import { ah } from "../lib/async.js";
 import { limited } from "../lib/rateLimit.js";
 import { newLeadReference } from "../lib/security.js";
 import { optionalAuth } from "../middleware/auth.js";
+import { notifyLead } from "../lib/messaging/service.js";
 
 const r = Router();
 
@@ -39,6 +40,7 @@ r.post("/", optionalAuth, ah(async (req, res) => {
   let reference = newLeadReference();
   while (await db.lead.findUnique({ where: { reference } })) reference = newLeadReference();
   await db.lead.create({ data: { reference, source, items: lines as Prisma.InputJsonArray, total, customerId: req.customerId ?? null } });
+  void notifyLead(reference, total);
 
   const text = [
     `Hi Lace & Luxe, I'd like to order (ref ${reference}):`,

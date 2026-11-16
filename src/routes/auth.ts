@@ -5,7 +5,7 @@ import { ah } from "../lib/async.js";
 import { phoneSchema } from "../lib/phone.js";
 import { hash, newOtp, newToken, safeEqual } from "../lib/security.js";
 import { limited } from "../lib/rateLimit.js";
-import { sendSms } from "../lib/sms.js";
+import { sendCode } from "../lib/messaging/service.js";
 import { clientIp } from "../lib/clientIp.js";
 import { seal } from "../lib/vault.js";
 
@@ -35,11 +35,9 @@ r.post("/request-code", ah(async (req, res) => {
 
   const code = newOtp();
   await db.otpCode.create({ data: { phone, codeHash: hash(`${phone}:${code}`), codeEnc: manual ? seal(code) : null, expiresAt: new Date(Date.now() + minutes * MIN) } });
-  try {
-    await sendSms(phone, `Your Lace & Luxe code is ${code}. It expires in ${minutes} minutes.`);
-  } catch (e) {
-    if (!manual) throw e; // in manual mode a failed text is fine: staff can send the code themselves
-  }
+  const sent = await sendCode(phone, code, minutes);
+  // If channels are set up but none could deliver, say so (unless staff will send the code by hand).
+  if (sent.configured && !sent.sent && !manual) throw new Error("We couldn't send the code. Please try again.");
   res.json({ ok: true, manual });
 }));
 

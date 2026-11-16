@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { db } from "./db.js";
+import { notifyOrder } from "./messaging/service.js";
 
 export class SoldOut extends Error {}
 
@@ -33,7 +34,7 @@ export async function reserveForOrder(orderId: number): Promise<boolean> {
  * (a late payment), it takes the stock now, or flags the order for staff when there isn't enough.
  */
 export async function settleOrder(orderId: number, extra: Prisma.OrderUpdateInput = {}): Promise<{ ok: boolean; shortStock: boolean }> {
-  return db.$transaction(async (tx) => {
+  const result = await db.$transaction(async (tx) => {
     const gate = await tx.order.updateMany({ where: { id: orderId, status: { not: "PAID" } }, data: { status: "PAID" } });
     if (gate.count === 0) return { ok: false, shortStock: false };
     const o = await tx.order.findUniqueOrThrow({ where: { id: orderId }, include: { items: true } });
@@ -57,4 +58,9 @@ export async function settleOrder(orderId: number, extra: Prisma.OrderUpdateInpu
     });
     return { ok: true, shortStock: short };
   });
+  if (result.ok) {
+    void notifyOrder("PAYMENT_RECEIVED", orderId);
+    if (result.shortStock) void notifyOrder("STAFF_STOCK_SHORT", orderId);
+  }
+  return result;
 }

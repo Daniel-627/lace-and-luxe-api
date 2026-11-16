@@ -254,3 +254,27 @@ model DiscountCode {
   active      Boolean   @default(true)
   createdAt   DateTime  @default(now())
 }
+
+model Message {
+  id        Int       @id @default(autoincrement())
+  category  String
+  audience  String
+  toPhone   String?
+  toEmail   String?
+  subject   String?
+  body      String
+  params    Json?
+  orderId   Int?
+  status    String    @default("PENDING")
+  channel   String?
+  attempts  Int       @default(0)
+  lastError String?
+  trail     Json?
+  nextTryAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  sentAt    DateTime?
+
+  @@index([status, nextTryAt])
+  @@index([createdAt])
+}

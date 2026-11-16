@@ -10,6 +10,7 @@ import { optionalAuth } from "../middleware/auth.js";
 import { orderView } from "../lib/views.js";
 import { payConfig, publicAccount, quote } from "../lib/pricing.js";
 import { SoldOut } from "../lib/stock.js";
+import { notifyOrder } from "../lib/messaging/service.js";
 
 const r = Router();
 const MIN = 60 * 1000;
@@ -90,6 +91,8 @@ r.post("/", optionalAuth, ah(async (req, res) => {
       });
     });
     res.status(201).json({ ...orderView(order), trackingToken: order.trackingToken });
+    void notifyOrder("ORDER_PLACED", order.id);
+    void notifyOrder("STAFF_NEW_ORDER", order.id);
   } catch (e) {
     if (e instanceof SoldOut) return res.status(409).json({ error: e.message });
     throw e;
