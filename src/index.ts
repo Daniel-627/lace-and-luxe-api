@@ -10,6 +10,8 @@ import leads from "./routes/leads.js";
 import adminAuth from "./routes/adminAuth.js";
 import admin from "./routes/admin.js";
 import adminCommerce from "./routes/adminCommerce.js";
+import checkout from "./routes/checkout.js";
+import { expireUnpaid } from "./lib/jobs.js";
 
 const app = express();
 app.set("trust proxy", 1); // behind Render's proxy, so req.ip is the real client
@@ -25,6 +27,7 @@ app.use("/api/leads", leads);
 app.use("/api/admin", adminAuth);
 app.use("/api/admin", admin);
 app.use("/api/admin", adminCommerce);
+app.use("/api/checkout", checkout);
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
@@ -33,3 +36,8 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 app.listen(env.PORT, () => console.log(`API listening on :${env.PORT}`));
+
+// Unpaid pay-now orders are released after the hold time (set in Admin > Payments).
+const sweep = () => expireUnpaid().catch((e) => console.error("expiry job failed", e));
+setInterval(sweep, 60_000);
+sweep();

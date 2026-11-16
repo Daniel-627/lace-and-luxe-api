@@ -114,6 +114,19 @@ model Order {
 
   fulfilment      String      @default("NEW")
   notes           String      @default("")
+  subtotal            Int       @default(0)
+  deliveryFee         Int       @default(0)
+  deliveryServiceId   Int?
+  deliveryServiceName String    @default("")
+  discountCode        String?
+  discountAmount      Int       @default(0)
+  payTiming           String    @default("NOW")
+  paymentAccountId    Int?
+  paymentClaim        String?
+  paymentClaimAt      DateTime?
+  payNote             String?
+  stockReserved       Boolean   @default(false)
+  expiresAt           DateTime?
 
   @@index([contactPhone])
 }

@@ -8,6 +8,7 @@ const schema = z.object({
   API_URL: z.string().url(),
   SESSION_SECRET: z.string().min(16, "SESSION_SECRET must be at least 16 characters"),
   SHOP_API_KEY: z.string().default(""),
+  MPESA_CALLBACK_SECRET: z.string().default(""),
   SMS_PROVIDER: z.enum(["console", "africastalking"]).default("console"),
   AT_ENV: z.enum(["sandbox", "production"]).default("sandbox"),
   AT_USERNAME: z.string().default("sandbox"),

@@ -6,6 +6,7 @@ import { ah } from "../lib/async.js";
 import { audit } from "../lib/audit.js";
 import { maskPhone, normalizeKePhone, phoneSchema } from "../lib/phone.js";
 import { unseal } from "../lib/vault.js";
+import { releaseStock, reserveForOrder, settleOrder } from "../lib/stock.js";
 import { hashPassword, tempPassword } from "../lib/password.js";
 import { newReference, newToken } from "../lib/security.js";
 import { requireOwner, requireStaff } from "../middleware/staff.js";
@@ -180,14 +181,7 @@ r.delete("/products/:id", requireOwner, ah(async (req, res) => {
 }));
 
 // ---------- Orders ----------
-async function markPaid(orderId: number, extra: Prisma.OrderUpdateInput) {
-  const o = await db.order.findUnique({ where: { id: orderId }, include: { items: true } });
-  if (!o || o.status === "PAID") return;
-  await db.$transaction([
-    db.order.update({ where: { id: orderId }, data: { status: "PAID", ...extra } }),
-    ...o.items.map((i) => db.variant.updateMany({ where: { id: i.variantId }, data: { stock: { decrement: i.qty } } })),
-  ]);
-}
+const markPaid = (orderId: number, extra: Prisma.OrderUpdateInput) => settleOrder(orderId, extra);
 
 r.get("/orders", ah(async (req, res) => {
   const str = (k: string) => (typeof req.query[k] === "string" && req.query[k] ? (req.query[k] as string) : undefined);
@@ -212,7 +206,7 @@ r.get("/orders/:id", ah(async (req, res) => {
   res.json(o);
 }));
 
-const Method = z.enum(["MPESA", "CASH", "BANK", "WHATSAPP"]);
+const Method = z.enum(["MPESA", "MPESA_MANUAL", "CASH", "BANK", "WHATSAPP"]);
 r.patch("/orders/:id", ah(async (req, res) => {
   const id = idOf(req);
   const b = z.object({
@@ -225,6 +219,7 @@ r.patch("/orders/:id", ah(async (req, res) => {
   const o = await db.order.findUnique({ where: { id } });
   if (!o) return res.status(404).json({ error: "Not found" });
   await db.order.update({ where: { id }, data: { ...(d.fulfilment && { fulfilment: d.fulfilment }), ...(d.notes !== undefined && { notes: d.notes }) } });
+  if (d.fulfilment === "CANCELLED") await releaseStock(id); // cancelling puts the stock back
   if (d.markPaid) await markPaid(id, { method: d.method ?? o.method ?? "WHATSAPP", mpesaReceipt: d.mpesaReceipt });
   audit(req, "order.update", `${o.reference} ${JSON.stringify(d)}`);
   res.json(await db.order.findUnique({ where: { id }, include: { items: true } }));
@@ -273,12 +268,13 @@ r.post("/leads/:id/convert", ah(async (req, res) => {
     data: {
       reference, trackingToken: newToken(16), contactName: d.name, contactPhone: d.phone, email: d.email, method: "WHATSAPP",
       deliveryName: d.delivery.name || d.name, deliveryPhone: d.delivery.phone || d.phone,
-      county: d.delivery.county, area: d.delivery.area, addressDetails: d.delivery.details, total: lead.total,
+      county: d.delivery.county, area: d.delivery.area, addressDetails: d.delivery.details, total: lead.total, subtotal: lead.total,
       items: { create: items.map((i) => ({ productId: variants.find((v) => v.id === i.variantId)!.productId, variantId: i.variantId, name: i.name, size: i.size, colour: i.colour, price: i.price, qty: i.qty })) },
     },
   });
   await db.lead.update({ where: { id }, data: { status: "CONVERTED", orderId: order.id } });
   if (d.paid) await markPaid(order.id, { method: d.method, mpesaReceipt: d.mpesaReceipt });
+  else await reserveForOrder(order.id); // hold the stock for an agreed, unpaid order
   audit(req, "lead.convert", `${lead.reference} -> ${order.reference}`);
   res.status(201).json(await db.order.findUnique({ where: { id: order.id }, include: { items: true } }));
 }));

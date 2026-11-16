@@ -33,7 +33,7 @@ export async function stkPush(args: { phone: string; amount: number; orderId: nu
       PartyA: msisdn,
       PartyB: sc,
       PhoneNumber: msisdn,
-      CallBackURL: `${env.API_URL}/api/pay/mpesa/callback`,
+      CallBackURL: `${env.API_URL}/api/pay/mpesa/callback${env.MPESA_CALLBACK_SECRET ? `/${env.MPESA_CALLBACK_SECRET}` : ""}`,
       AccountReference: `ORDER${args.orderId}`,
       TransactionDesc: `Order ${args.orderId}`,
     }),
