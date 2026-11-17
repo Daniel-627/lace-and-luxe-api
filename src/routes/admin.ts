@@ -25,7 +25,7 @@ const first = (e: z.ZodError) => e.issues[0]?.message ?? "Invalid input";
 r.get("/stats", ah(async (_req, res) => {
   const EAT = 3 * 3600 * 1000; // Kenya is UTC+3
   const startToday = new Date(Math.floor((Date.now() + EAT) / 86400000) * 86400000 - EAT);
-  const [ordersToday, paid, pendingOrders, newLeads, low, pendingCodes, messagesNeedingAction] = await Promise.all([
+  const [ordersToday, paid, pendingOrders, newLeads, low, pendingCodes, messagesNeedingAction, reviewsPending] = await Promise.all([
     db.order.count({ where: { createdAt: { gte: startToday } } }),
     db.order.aggregate({ _sum: { total: true }, where: { status: "PAID", createdAt: { gte: startToday } } }),
     db.order.count({ where: { status: "PENDING" } }),
@@ -33,9 +33,10 @@ r.get("/stats", ah(async (_req, res) => {
     db.variant.findMany({ where: { stock: { lte: 3 }, product: { active: true } }, include: { product: { select: { name: true } } }, orderBy: { stock: "asc" }, take: 10 }),
     db.otpCode.count({ where: { codeEnc: { not: null }, usedAt: null, expiresAt: { gt: new Date() } } }),
     db.message.count({ where: { status: { in: ["MANUAL", "FAILED"] } } }),
+    db.review.count({ where: { status: "PENDING" } }),
   ]);
   res.json({
-    ordersToday, revenueToday: paid._sum.total ?? 0, pendingOrders, newLeads, pendingCodes, messagesNeedingAction,
+    ordersToday, revenueToday: paid._sum.total ?? 0, pendingOrders, newLeads, pendingCodes, messagesNeedingAction, reviewsPending,
     lowStock: low.map((v) => ({ variantId: v.id, name: v.product.name, size: v.size, colour: v.colour, stock: v.stock })),
   });
 }));

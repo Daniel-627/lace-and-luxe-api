@@ -13,6 +13,8 @@ import adminCommerce from "./routes/adminCommerce.js";
 import checkout from "./routes/checkout.js";
 import { expireUnpaid } from "./lib/jobs.js";
 import adminMessaging from "./routes/adminMessaging.js";
+import adminContent from "./routes/adminContent.js";
+import site from "./routes/site.js";
 import { sweepMessages } from "./lib/messaging/service.js";
 
 const app = express();
@@ -29,6 +31,8 @@ app.use("/api/leads", leads);
 app.use("/api/admin", adminAuth);
 app.use("/api/admin", admin);
 app.use("/api/admin", adminMessaging); // before adminCommerce, which is owner-only
+app.use("/api/admin", adminContent);
+app.use("/api/site", site);
 app.use("/api/admin", adminCommerce);
 app.use("/api/checkout", checkout);
 app.get("/health", (_req, res) => res.json({ ok: true }));
