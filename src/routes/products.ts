@@ -2,8 +2,11 @@ import { Router } from "express";
 import { z } from "zod";
 import { db } from "../lib/db.js";
 import { ah } from "../lib/async.js";
+import { readCategoryOrder, sortByOrder } from "../lib/categoryOrder.js";
 
 const r = Router();
+/** What shoppers may see: published, and not auto-hidden because every size is sold out. */
+const visible = { active: true, OR: [{ soldOutBehavior: "SHOW" }, { variants: { some: { stock: { gt: 0 } } } }] };
 const inc = { category: true, variants: { orderBy: { id: "asc" as const } } };
 
 const SIZE_ORDER = ["XXS", "XS", "S", "M", "L", "XL", "XXL", "3XL", "4XL"];
@@ -28,7 +31,7 @@ r.get("/", ah(async (req, res) => {
   const category = typeof req.query.category === "string" ? req.query.category : undefined;
   const q = typeof req.query.q === "string" ? req.query.q : undefined;
   const products = await db.product.findMany({
-    where: { active: true, ...(category && { category: { slug: category } }), ...(q && { name: { contains: q, mode: "insensitive" } }) },
+    where: { ...visible, ...(category && { category: { slug: category } }), ...(q && { name: { contains: q, mode: "insensitive" } }) },
     include: inc, orderBy: { id: "desc" },
   });
   res.json(withRating(products, await ratingsFor(products.map((p) => p.id))));
@@ -50,7 +53,7 @@ r.get("/search", ah(async (req, res) => {
   const words = (q ?? "").split(/\s+/).filter(Boolean).slice(0, 5);
   const scope = await db.product.findMany({
     where: {
-      active: true, ...(category && { category: { slug: category } }),
+      ...visible, ...(category && { category: { slug: category } }),
       ...(words.length && { AND: words.map((w) => ({ OR: [
         { name: { contains: w, mode: "insensitive" as const } }, { description: { contains: w, mode: "insensitive" as const } }, { category: { name: { contains: w, mode: "insensitive" as const } } },
       ] })) }),
@@ -69,7 +72,7 @@ r.get("/search", ah(async (req, res) => {
     : b.id - a.id);
 
   const prices = scope.flatMap((x) => x.variants.map((v) => v.price));
-  const cats = await db.category.findMany({ include: { _count: { select: { products: { where: { active: true } } } } }, orderBy: { name: "asc" } });
+  const cats = await db.category.findMany({ include: { _count: { select: { products: { where: visible } } } }, orderBy: { name: "asc" } });
   res.json({
     products: withRating(items.slice((page - 1) * 24, page * 24), ratings), total: items.length, page, pageSize: 24,
     facets: {
@@ -83,16 +86,27 @@ r.get("/search", ah(async (req, res) => {
 
 r.get("/by-ids", ah(async (req, res) => {
   const ids = String(req.query.ids ?? "").split(",").map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 50);
-  const found = await db.product.findMany({ where: { id: { in: ids }, active: true }, include: inc });
+  const found = await db.product.findMany({ where: { id: { in: ids }, ...visible }, include: inc });
   const ordered = ids.flatMap((id) => found.filter((x) => x.id === id));
   res.json(withRating(ordered, await ratingsFor(ordered.map((x) => x.id))));
 }));
 
+// The shop menu and the "all categories" page: only categories with something to buy or see, in the owner's order.
+r.get("/categories", ah(async (_req, res) => {
+  const [cats, order] = await Promise.all([
+    db.category.findMany({
+      include: { _count: { select: { products: { where: visible } } }, products: { where: { ...visible, image: { not: null } }, select: { image: true }, orderBy: { id: "desc" }, take: 1 } },
+    }),
+    readCategoryOrder(),
+  ]);
+  res.json(sortByOrder(cats.filter((c) => c._count.products > 0), order).map((c) => ({ slug: c.slug, name: c.name, count: c._count.products, image: c.products[0]?.image ?? null })));
+}));
+
 r.get("/:slug", ah(async (req, res) => {
-  const p = await db.product.findFirst({ where: { slug: req.params.slug, active: true }, include: { ...inc, media: { orderBy: { position: "asc" } } } });
+  const p = await db.product.findFirst({ where: { slug: req.params.slug, ...visible }, include: { ...inc, media: { orderBy: { position: "asc" } } } });
   if (!p) return res.status(404).json({ error: "Not found" });
   // Related: same category first, then the newest others, only what can be bought.
-  const others = await db.product.findMany({ where: { active: true, id: { not: p.id } }, include: inc, orderBy: { id: "desc" }, take: 40 });
+  const others = await db.product.findMany({ where: { ...visible, id: { not: p.id } }, include: inc, orderBy: { id: "desc" }, take: 40 });
   const buyable = others.filter(inStock);
   const related = [...buyable.filter((x) => p.categoryId && x.categoryId === p.categoryId), ...buyable.filter((x) => !(p.categoryId && x.categoryId === p.categoryId))].slice(0, 4);
   const ratings = await ratingsFor([p.id, ...related.map((x) => x.id)]);

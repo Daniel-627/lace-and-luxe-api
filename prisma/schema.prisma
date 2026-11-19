@@ -25,6 +25,8 @@ model Product {
   active      Boolean   @default(true)
   payNow         Boolean @default(true)
   payOnDelivery  Boolean @default(false)
+  // What happens when every size is out of stock: SHOW keeps it listed as "Sold out", HIDE removes it from the shop until restocked.
+  soldOutBehavior String @default("SHOW")
   variants    Variant[]
   media       ProductMedia[]
   reviews     Review[]

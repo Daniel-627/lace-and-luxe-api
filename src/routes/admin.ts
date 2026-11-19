@@ -11,6 +11,7 @@ import { notifyOrder } from "../lib/messaging/service.js";
 import { hashPassword, tempPassword } from "../lib/password.js";
 import { newReference, newToken } from "../lib/security.js";
 import { requireOwner, requireStaff } from "../middleware/staff.js";
+import { readCategoryOrder, saveCategoryOrder, sortByOrder } from "../lib/categoryOrder.js";
 
 const r = Router();
 r.use(requireStaff);
@@ -43,7 +44,18 @@ r.get("/stats", ah(async (_req, res) => {
 
 // ---------- Categories ----------
 r.get("/categories", ah(async (_req, res) => {
-  res.json(await db.category.findMany({ orderBy: { name: "asc" }, include: { _count: { select: { products: true } } } }));
+  const [cats, order] = await Promise.all([db.category.findMany({ orderBy: { name: "asc" }, include: { _count: { select: { products: true } } } }), readCategoryOrder()]);
+  res.json(sortByOrder(cats, order));
+}));
+
+// The order the shop menu uses: the first few appear in the menu, the rest go under "More".
+r.put("/categories/order", ah(async (req, res) => {
+  const b = z.object({ slugs: z.array(z.string().trim().min(1).max(80)).max(200) }).safeParse(req.body);
+  if (!b.success) return res.status(400).json({ error: "Invalid input" });
+  const known = new Set((await db.category.findMany({ select: { slug: true } })).map((c) => c.slug));
+  await saveCategoryOrder([...new Set(b.data.slugs)].filter((x) => known.has(x)));
+  audit(req, "category.reorder");
+  res.json({ ok: true });
 }));
 
 r.post("/categories", ah(async (req, res) => {
@@ -112,6 +124,7 @@ const ProductIn = z.object({
   active: z.boolean().default(true),
   payNow: z.boolean().default(true),
   payOnDelivery: z.boolean().default(false),
+  soldOutBehavior: z.enum(["SHOW", "HIDE"]).default("SHOW"),
   variants: z.array(VariantIn).min(1, "Add at least one size/colour").max(100),
   media: z.array(MediaIn).max(20).default([]),
 });
@@ -150,7 +163,7 @@ r.post("/products", ah(async (req, res) => {
   try {
     const p = await db.product.create({
       data: {
-        name: d.name, slug, description: d.description, image: coverOf(d.media), categoryId: d.categoryId ?? null, active: d.active, payNow: d.payNow, payOnDelivery: d.payOnDelivery,
+        name: d.name, slug, description: d.description, image: coverOf(d.media), categoryId: d.categoryId ?? null, active: d.active, payNow: d.payNow, payOnDelivery: d.payOnDelivery, soldOutBehavior: d.soldOutBehavior,
         media: { create: mediaRows(d.media) },
         variants: { create: d.variants.map((v) => ({ sku: v.sku || makeSku(slug, v), size: v.size, colour: v.colour, colourHex: v.colourHex ?? null, price: v.price, stock: v.stock })) },
       },
@@ -179,7 +192,7 @@ r.put("/products/:id", ah(async (req, res) => {
     await db.$transaction([
       db.productMedia.deleteMany({ where: { productId: id } }),
       db.variant.deleteMany({ where: { productId: id, id: { notIn: keep } } }),
-      db.product.update({ where: { id }, data: { name: d.name, slug, description: d.description, image: coverOf(d.media), categoryId: d.categoryId ?? null, active: d.active, payNow: d.payNow, payOnDelivery: d.payOnDelivery } }),
+      db.product.update({ where: { id }, data: { name: d.name, slug, description: d.description, image: coverOf(d.media), categoryId: d.categoryId ?? null, active: d.active, payNow: d.payNow, payOnDelivery: d.payOnDelivery, soldOutBehavior: d.soldOutBehavior } }),
       ...d.variants.map((v) => {
         const data = { size: v.size, colour: v.colour, colourHex: v.colourHex ?? null, price: v.price, stock: v.stock };
         return v.id
@@ -195,6 +208,11 @@ r.put("/products/:id", ah(async (req, res) => {
 
 r.delete("/products/:id", requireOwner, ah(async (req, res) => {
   const id = idOf(req); if (!id) return res.status(400).json({ error: "Bad id" });
+  // Orders keep their own copy of the product name and price, but cancelling or restocking an old order needs the product's sizes to still exist.
+  const ordered = await db.orderItem.count({ where: { productId: id } });
+  if (ordered > 0) return res.status(409).json({ error: `This product is in ${ordered} order${ordered === 1 ? "" : "s"}, so it can't be deleted without breaking your order history. Untick "Show in the shop" to hide it instead.` });
+  const found = await db.product.findUnique({ where: { id }, select: { id: true } });
+  if (!found) return res.status(404).json({ error: "Not found" });
   const p = await db.product.delete({ where: { id } });
   audit(req, "product.delete", p.name);
   res.json({ ok: true });
