@@ -59,7 +59,24 @@ r.post("/categories", ah(async (req, res) => {
 r.patch("/categories/:id", ah(async (req, res) => {
   const id = idOf(req); const b = z.object({ name: z.string().trim().min(2).max(60) }).safeParse(req.body);
   if (!id || !b.success) return res.status(400).json({ error: "Invalid input" });
-  res.json(await db.category.update({ where: { id }, data: { name: b.data.name } }));
+  try {
+    const c = await db.category.update({ where: { id }, data: { name: b.data.name } });
+    audit(req, "category.rename", c.name);
+    res.json(c);
+  } catch (e) {
+    if ((e as { code?: string }).code === "P2025") return res.status(404).json({ error: "Category not found" });
+    throw e;
+  }
+}));
+
+r.delete("/categories/:id", requireOwner, ah(async (req, res) => {
+  const id = idOf(req); if (!id) return res.status(400).json({ error: "Bad id" });
+  const c = await db.category.findUnique({ where: { id }, include: { _count: { select: { products: true } } } });
+  if (!c) return res.status(404).json({ error: "Category not found" });
+  if (c._count.products > 0) return res.status(409).json({ error: `Move or remove the ${c._count.products} product${c._count.products === 1 ? "" : "s"} in this category first` });
+  await db.category.delete({ where: { id } });
+  audit(req, "category.delete", c.name);
+  res.json({ ok: true });
 }));
 
 // ---------- Products ----------

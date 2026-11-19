@@ -25,6 +25,8 @@ const schema = z.object({
   DARAJA_SECRET: z.string().default(""),
   DARAJA_SHORTCODE: z.string().default(""),
   DARAJA_PASSKEY: z.string().default(""),
+  // Slack/Discord/any JSON webhook that receives an alert when the API hits a real error. Optional.
+  ALERT_WEBHOOK_URL: z.union([z.string().url(), z.literal("")]).default(""),
 });
 
 export const env = schema.parse(process.env);
