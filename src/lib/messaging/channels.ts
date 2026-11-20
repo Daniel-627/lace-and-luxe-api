@@ -27,8 +27,15 @@ export const ADAPTERS: Record<Channel, Adapter> = {
     async send(m, cfg) {
       // Messages we start need an approved template. Free text only works inside a 24-hour window after the customer wrote to us.
       const template = cfg.templates[m.category];
+      if (m.category === "CODE" && !template) throw new Error("WhatsApp: no template name is set for Sign-in codes (Admin > Messaging)");
+      const lang = { code: cfg.waLanguage };
+      // Sign-in codes must use a template created in the "Authentication" category. Meta requires the code twice: in the body,
+      // and in the template's copy-code button, otherwise it rejects the message as missing a parameter.
+      const components = m.category === "CODE"
+        ? [{ type: "body", parameters: [{ type: "text", text: m.params[0] ?? "" }] }, { type: "button", sub_type: "url", index: "0", parameters: [{ type: "text", text: m.params[0] ?? "" }] }]
+        : m.params.length ? [{ type: "body", parameters: m.params.map((text) => ({ type: "text", text: oneLine(text) })) }] : [];
       const payload = template
-        ? { messaging_product: "whatsapp", to: m.toPhone, type: "template", template: { name: template, language: { code: cfg.waLanguage }, components: m.params.length ? [{ type: "body", parameters: m.params.map((text) => ({ type: "text", text: oneLine(text) })) }] : [] } }
+        ? { messaging_product: "whatsapp", to: m.toPhone, type: "template", template: { name: template, language: lang, components } }
         : { messaging_product: "whatsapp", to: m.toPhone, type: "text", text: { body: m.body } };
       const r = await fetch(`https://graph.facebook.com/${env.WHATSAPP_API_VERSION}/${env.WHATSAPP_PHONE_ID}/messages`, {
         method: "POST", headers: { Authorization: `Bearer ${env.WHATSAPP_TOKEN}`, "Content-Type": "application/json" }, body: JSON.stringify(payload), signal: AbortSignal.timeout(15000),

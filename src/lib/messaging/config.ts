@@ -22,7 +22,7 @@ export const CATEGORIES: Record<string, CategoryMeta> = {
 };
 
 export const defaultChain = (category: string): Channel[] =>
-  category === "CODE" ? ["sms", "whatsapp"] : CATEGORIES[category]?.audience === "STAFF" ? ["sms", "whatsapp", "email"] : ["whatsapp", "sms", "email"];
+  category === "CODE" ? ["whatsapp", "sms"] : CATEGORIES[category]?.audience === "STAFF" ? ["sms", "whatsapp", "email"] : ["whatsapp", "sms", "email"];
 
 export interface StaffRecipient { name: string; phone: string; email: string }
 export interface MsgConfig {
